@@ -1,5 +1,6 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();  // Import SQLite3
+const sqlite = require('sqlite'); // Import sqlite package
+const sqlite3 = require('sqlite3'); // Import sqlite3 driver
 const cors = require('cors');
 
 const app = express();
@@ -7,79 +8,74 @@ app.use(express.json());
 app.use(cors());
 
 // Open the SQLite database (or create it if it doesn't exist)
-const db = new sqlite3.Database('./todoapp.db', (err) => {
-    if (err) {
-        console.error("Failed to open database:", err);
-    } else {
-        console.log("Connected to SQLite database!");
-    }
-});
+let db;
 
-// Create the todos table if it doesn't exist
-db.run(`
-    CREATE TABLE IF NOT EXISTS todos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task TEXT NOT NULL,
-        completed BOOLEAN DEFAULT FALSE
-    )
-`, (err) => {
-    if (err) {
-        console.error("Error creating table:", err);
+// Open the database asynchronously
+async function openDb() {
+    try {
+        db = await sqlite.open({
+            filename: './todoapp.db',
+            driver: sqlite3.Database // Use sqlite3.Database for compatibility with SQLite3
+        });
+        console.log("Connected to SQLite database!");
+        // Create the todos table if it doesn't exist
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS todos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task TEXT NOT NULL,
+                completed BOOLEAN DEFAULT FALSE
+            )
+        `);
+    } catch (err) {
+        console.error("Failed to open database:", err);
     }
-});
+}
+
+// Call openDb to initialize the database connection
+openDb();
 
 // Get all todos
-app.get('/todos', (req, res) => {
-    db.all("SELECT * FROM todos", (err, rows) => {
-        if (err) {
-            res.status(500).send("Error retrieving todos");
-            return;
-        }
+app.get('/todos', async (req, res) => {
+    try {
+        const rows = await db.all("SELECT * FROM todos");
         res.json(rows);
-    });
+    } catch (err) {
+        res.status(500).send("Error retrieving todos");
+    }
 });
 
 // Add a new todo
-app.post('/todos', (req, res) => {
+app.post('/todos', async (req, res) => {
     const { task } = req.body;
-    const stmt = db.prepare("INSERT INTO todos (task) VALUES (?)");
-    stmt.run(task, function (err) {
-        if (err) {
-            res.status(500).send("Error adding todo");
-            return;
-        }
-        res.json({ id: this.lastID, task, completed: false });
-    });
-    stmt.finalize();
+    try {
+        const result = await db.run("INSERT INTO todos (task) VALUES (?)", [task]);
+        res.json({ id: result.lastID, task, completed: false });
+    } catch (err) {
+        res.status(500).send("Error adding todo");
+    }
 });
 
 // Update a todo (mark as completed)
-app.put('/todos/:id', (req, res) => {
+app.put('/todos/:id', async (req, res) => {
     const { id } = req.params;
     const { completed } = req.body;
-    const stmt = db.prepare("UPDATE todos SET completed = ? WHERE id = ?");
-    stmt.run(completed, id, (err) => {
-        if (err) {
-            res.status(500).send("Error updating todo");
-            return;
-        }
+    try {
+        await db.run("UPDATE todos SET completed = ? WHERE id = ?", [completed, id]);
         res.json({ message: "Todo updated" });
-    });
-    stmt.finalize();
+    } catch (err) {
+        res.status(500).send("Error updating todo");
+    }
 });
 
 // Delete a todo
-app.delete('/todos/:id', (req, res) => {
+app.delete('/todos/:id', async (req, res) => {
     const { id } = req.params;
-    const stmt = db.prepare("DELETE FROM todos WHERE id = ?");
-    stmt.run(id, (err) => {
-        if (err) {
-            res.status(500).send("Error deleting todo");
-            return;
-        }
+    try {
+        await db.run("DELETE FROM todos WHERE id = ?", [id]);
         res.json({ message: "Todo deleted" });
-    });
-    stmt.finalize();
+    } catch (err) {
+        res.status(500).send("Error deleting todo");
+    }
 });
 
 // Start the server
